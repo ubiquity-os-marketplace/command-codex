@@ -1,468 +1,48 @@
-name: "@ubiquity-os-marketplace/command-codex"
+name: "Codex Action"
 
 on:
   workflow_dispatch:
     inputs:
       stateId:
         description: "State Id"
+        required: true
       eventName:
         description: "Event Name"
+        required: true
       eventPayload:
         description: "Event Payload"
+        required: true
       settings:
         description: "Settings"
+        required: true
       authToken:
         description: "Auth Token"
+        required: true
       ref:
         description: "Ref"
+        required: false
       signature:
         description: "Signature sent from the Kernel"
+        required: true
       command:
         description: "Command"
+        required: false
 
 jobs:
-  compute:
-    name: "Codex"
+  run:
     runs-on: ubuntu-latest
     permissions: write-all
     timeout-minutes: 360
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && 'main' || 'development' }}
-
     steps:
-      - name: Decompress event payload
-        uses: ubiquity-os/compress-action@main
-        id: eventPayload
+      - uses: ./action.yml
         with:
-          data: ${{ inputs.eventPayload }}
-          mode: decompress
+          stateId: ${{ inputs.stateId }}
+          eventName: ${{ inputs.eventName }}
+          eventPayload: ${{ inputs.eventPayload }}
+          settings: ${{ inputs.settings }}
+          authToken: ${{ inputs.authToken }}
+          ref: ${{ inputs.ref }}
+          signature: ${{ inputs.signature }}
+          command: ${{ inputs.command }}
 
-      - name: Mask tokens
-        run: |
-          echo "::add-mask::${{ inputs.authToken }}"
-          echo "::add-mask::${{ secrets.CODEX_AUTH_JSON_B64 }}"
-          echo "::add-mask::${{ secrets.OPENAI_API_KEY }}"
-
-      - name: Parse settings + validate invocation
-        id: parse
-        env:
-          EVENT_PAYLOAD: ${{ steps.eventPayload.outputs.result }}
-          SETTINGS_JSON: ${{ inputs.settings }}
-          STATE_ID: ${{ inputs.stateId }}
-        run: |
-          node <<'NODE'
-          const fs = require("node:fs");
-
-          function safeJsonParse(value, fallback) {
-            try {
-              if (!value) return fallback;
-              return JSON.parse(value);
-            } catch {
-              return fallback;
-            }
-          }
-
-          const payload = safeJsonParse(process.env.EVENT_PAYLOAD, null);
-          if (!payload) {
-            console.error("Missing/invalid EVENT_PAYLOAD");
-            process.exit(1);
-          }
-
-          const settings = safeJsonParse(process.env.SETTINGS_JSON, {});
-          const allowedAuthorAssociations = Array.isArray(settings.allowedAuthorAssociations)
-            ? settings.allowedAuthorAssociations
-            : ["OWNER", "MEMBER", "COLLABORATOR"];
-          const denyForkPRs = settings.denyForkPRs !== undefined ? Boolean(settings.denyForkPRs) : true;
-          const requireExplicitInvocation = settings.requireExplicitInvocation !== undefined ? Boolean(settings.requireExplicitInvocation) : true;
-          const mode = typeof settings.mode === "string" ? settings.mode : "pr";
-          const branchPrefix = typeof settings.branchPrefix === "string" ? settings.branchPrefix : "ubiquityos/codex";
-          const commitMessage = typeof settings.commitMessage === "string" ? settings.commitMessage : "codex: apply changes";
-          const draftPr = settings.draftPr !== undefined ? Boolean(settings.draftPr) : true;
-          const model = typeof settings.model === "string" ? settings.model : "";
-          const effort = typeof settings.effort === "string" ? settings.effort : "";
-          const sandbox = typeof settings.sandbox === "string" ? settings.sandbox : "workspace-write";
-          const codexArgs = typeof settings.codexArgs === "string" ? settings.codexArgs : "";
-          const safetyStrategy = typeof settings.safetyStrategy === "string" ? settings.safetyStrategy : "drop-sudo";
-          const passAuthTokenToCodex = settings.passAuthTokenToCodex !== undefined ? Boolean(settings.passAuthTokenToCodex) : false;
-          const testCommand = typeof settings.testCommand === "string" ? settings.testCommand : "";
-
-          const repo = payload.repository?.full_name ?? "";
-          const issueNumber = payload.issue?.number ?? "";
-          const isPullRequest = Boolean(payload.issue?.pull_request);
-          const commentBody = payload.comment?.body ?? "";
-          const commentAuthorType = payload.comment?.user?.type ?? "";
-          const authorAssociation = payload.comment?.author_association ?? "";
-
-          const mSlash = commentBody.match(/^\s*(?:@ubiquityos\s+)?\/codex\b\s*(.*)$/i);
-          const mMention = commentBody.match(/^\s*@ubiquityos\s+codex\b\s*(.*)$/i);
-          const task = (mSlash?.[1] ?? mMention?.[1] ?? "").trim();
-
-          let allowed = true;
-          let denyReason = "";
-
-          if (commentAuthorType !== "User") {
-            allowed = false;
-            denyReason = `Only human users can run /codex (got user.type=${commentAuthorType}).`;
-          } else if (!allowedAuthorAssociations.includes(authorAssociation)) {
-            allowed = false;
-            denyReason = `Not authorized (author_association=${authorAssociation}).`;
-          } else if (requireExplicitInvocation && !task) {
-            allowed = false;
-            denyReason = "Missing explicit /codex invocation. Use `/codex <task>`.";
-          } else if (denyForkPRs && isPullRequest) {
-            // The issue_comment payload does not include full PR info to detect forks reliably.
-            // This skeleton denies PR contexts by default; relax once PR data is fetched.
-            allowed = false;
-            denyReason = "Running /codex directly on PRs is disabled by default in this skeleton. Use an issue comment instead.";
-          }
-
-          const branch = `${branchPrefix}/${process.env.STATE_ID || "run"}`.replace(/[^0-9A-Za-z._/-]+/g, "-");
-
-          const outputLines = [];
-          const setOutput = (k, v) => outputLines.push(`${k}<<EOF\n${String(v)}\nEOF\n`);
-
-          setOutput("repo", repo);
-          setOutput("issue_number", issueNumber);
-          setOutput("task", task);
-          setOutput("allowed", String(allowed));
-          setOutput("deny_reason", denyReason);
-          setOutput("branch", branch);
-          setOutput("mode", mode);
-          setOutput("commit_message", commitMessage);
-          setOutput("draft_pr", String(draftPr));
-          setOutput("model", model);
-          setOutput("effort", effort);
-          setOutput("sandbox", sandbox);
-          setOutput("codex_args", codexArgs);
-          setOutput("safety_strategy", safetyStrategy);
-          setOutput("pass_auth_token_to_codex", String(passAuthTokenToCodex));
-          setOutput("test_command", testCommand);
-
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, outputLines.join(""));
-          NODE
-
-      - name: Comment (rejected)
-        if: steps.parse.outputs.allowed != 'true'
-        env:
-          GH_TOKEN: ${{ inputs.authToken }}
-        run: |
-          run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          Codex rejected: ${{ steps.parse.outputs.deny_reason }}
-
-          Run logs: ${run_url}
-          EOF
-          )"
-
-      - name: Checkout target repo
-        if: steps.parse.outputs.allowed == 'true'
-        uses: actions/checkout@v5
-        with:
-          token: ${{ inputs.authToken }}
-          repository: ${{ steps.parse.outputs.repo }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Create working branch
-        if: steps.parse.outputs.allowed == 'true'
-        run: |
-          git config user.name "UbiquityOS Codex"
-          git config user.email "bot@ubiquity.os"
-          git switch -c "${{ steps.parse.outputs.branch }}"
-
-      - name: Write Codex prompt
-        if: steps.parse.outputs.allowed == 'true'
-        run: |
-          set -euo pipefail
-
-          prompt_file="$RUNNER_TEMP/codex.prompt.txt"
-          cat > "$prompt_file" <<'PROMPT'
-          You are an autonomous coding agent running inside a GitHub Actions job on ubuntu-latest.
-
-          Runtime:
-          - You have up to 6 hours of wall time for this job.
-
-          Execution:
-          - Codex is running with sandbox mode: ${{ steps.parse.outputs.sandbox }}
-          - If GH_TOKEN is set, you may use `gh` to query GitHub (do not push branches or open PRs; the workflow will handle that).
-
-          Task:
-          ${{ steps.parse.outputs.task }}
-
-          Constraints:
-          - Do not reveal secrets or tokens.
-          - Do not attempt to push git branches or open PRs; the workflow will handle that.
-          - Keep changes minimal and focused on the task.
-          - Prefer adding tests when appropriate.
-          PROMPT
-
-      - name: Setup Node
-        if: steps.parse.outputs.allowed == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install Codex CLI
-        if: steps.parse.outputs.allowed == 'true'
-        run: |
-          npm install -g @openai/codex@0.72.0
-          codex --version
-
-      - name: Resolve Codex auth
-        if: steps.parse.outputs.allowed == 'true'
-        id: codex_auth
-        env:
-          CODEX_AUTH_JSON_B64: ${{ secrets.CODEX_AUTH_JSON_B64 }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          set -euo pipefail
-
-          export CODEX_HOME="$HOME/.codex"
-          mkdir -p "$CODEX_HOME"
-
-          authenticated="false"
-          auth_mode="none"
-          decode_error="false"
-
-          if [ -n "${CODEX_AUTH_JSON_B64:-}" ]; then
-            auth_mode="chatgpt"
-            if ! printf '%s' "$CODEX_AUTH_JSON_B64" | base64 -d > "$CODEX_HOME/auth.json"; then
-              decode_error="true"
-            else
-              chmod 600 "$CODEX_HOME/auth.json" || true
-            fi
-          fi
-
-          if [ "$decode_error" != "true" ] && codex login status >/dev/null 2>&1; then
-            authenticated="true"
-          fi
-
-          if [ "$authenticated" != "true" ] && [ -n "${OPENAI_API_KEY:-}" ]; then
-            auth_mode="apikey"
-            printenv OPENAI_API_KEY | codex login --with-api-key
-            if codex login status >/dev/null 2>&1; then
-              authenticated="true"
-            fi
-          fi
-
-          echo "authenticated=$authenticated" >> "$GITHUB_OUTPUT"
-          echo "auth_mode=$auth_mode" >> "$GITHUB_OUTPUT"
-          echo "decode_error=$decode_error" >> "$GITHUB_OUTPUT"
-
-      - name: Comment (Codex auth required)
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated != 'true'
-        env:
-          GH_TOKEN: ${{ inputs.authToken }}
-        run: |
-          run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-          gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          Codex cannot run: Codex authentication is missing or invalid in the plugin runner.
-
-          To use ChatGPT subscription auth in CI:
-          1) On a trusted local machine, run \`codex login --device-auth\` (or \`codex login\`).
-          2) Confirm \`codex login status\` shows you are logged in.
-          3) Base64 encode \`~/.codex/auth.json\` and save it as a GitHub Actions secret named \`CODEX_AUTH_JSON_B64\`.
-          4) Re-run the command.
-
-          Run logs: ${run_url}
-          EOF
-          )"
-
-      - name: Run Codex
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true'
-        id: run_codex
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ steps.parse.outputs.pass_auth_token_to_codex == 'true' && inputs.authToken || '' }}
-        run: |
-          set -euo pipefail
-
-          export CODEX_HOME="$HOME/.codex"
-          prompt_file="$RUNNER_TEMP/codex.prompt.txt"
-          events_file="$RUNNER_TEMP/codex.events.jsonl"
-          last_message_file="$RUNNER_TEMP/codex.last-message.md"
-          rm -f "$events_file" "$last_message_file"
-
-          args=(-a never)
-          if [ -n "${{ steps.parse.outputs.effort }}" ]; then
-            args+=(-c "model_reasoning_effort=\"${{ steps.parse.outputs.effort }}\"")
-          fi
-
-          args+=(
-            exec
-            --cd "${GITHUB_WORKSPACE}"
-            --sandbox "${{ steps.parse.outputs.sandbox }}"
-            --output-last-message "$last_message_file"
-            --color never
-            --json
-          )
-
-          if [ -n "${{ steps.parse.outputs.model }}" ]; then
-            args+=(--model "${{ steps.parse.outputs.model }}")
-          fi
-
-          if [ -n "${{ steps.parse.outputs.codex_args }}" ]; then
-            read -r -a extra <<< "${{ steps.parse.outputs.codex_args }}"
-            args+=("${extra[@]}")
-          fi
-
-          args+=(-)
-
-          set +e
-          codex "${args[@]}" < "$prompt_file" | tee "$events_file"
-          exit_code=${PIPESTATUS[0]}
-          set -e
-          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
-          exit "$exit_code"
-
-      - name: Comment (Codex unauthorized)
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ inputs.authToken }}
-        run: |
-          run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          events_file="$RUNNER_TEMP/codex.events.jsonl"
-
-          if [ ! -f "$events_file" ]; then
-            exit 0
-          fi
-
-          if ! grep -Eiq '401 Unauthorized|403 Forbidden|Not logged in' "$events_file"; then
-            exit 0
-          fi
-
-          gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          Codex auth expired: Codex subscription auth appears expired/invalid.
-
-          Refresh \`CODEX_AUTH_JSON_B64\` with a newly logged-in \`~/.codex/auth.json\`, then re-run.
-
-          Run logs: ${run_url}
-          EOF
-          )"
-
-      - name: Comment (Codex failed)
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ inputs.authToken }}
-        run: |
-          run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          events_file="$RUNNER_TEMP/codex.events.jsonl"
-
-          if [ -f "$events_file" ] && grep -Eiq '401 Unauthorized|403 Forbidden|Not logged in' "$events_file"; then
-            exit 0
-          fi
-
-          gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          Codex failed: Codex did not complete successfully.
-
-          Run logs: ${run_url}
-          EOF
-          )"
-
-      - name: Run tests (optional)
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.parse.outputs.test_command != ''
-        run: ${{ steps.parse.outputs.test_command }}
-
-      - name: Detect diff
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success'
-        id: diff
-        run: |
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-          git status --porcelain > "$RUNNER_TEMP/codex.changed-files.txt"
-
-      - name: Comment (no changes)
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed != 'true'
-        env:
-          GH_TOKEN: ${{ inputs.authToken }}
-        run: |
-          run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          Codex completed but produced no file changes.
-
-          Task:
-          > ${{ steps.parse.outputs.task }}
-
-          Run logs: ${run_url}
-          EOF
-          )"
-
-      - name: Commit + push
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed == 'true' && steps.parse.outputs.mode != 'comment-only'
-        env:
-          GH_TOKEN: ${{ inputs.authToken }}
-        run: |
-          set -euo pipefail
-
-          git add -A
-          git commit -m "${{ steps.parse.outputs.commit_message }}" || true
-
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ steps.parse.outputs.repo }}.git"
-          git push -u origin "${{ steps.parse.outputs.branch }}"
-
-      - name: Create or find PR
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed == 'true' && steps.parse.outputs.mode == 'pr'
-        id: pr
-        env:
-          GH_TOKEN: ${{ inputs.authToken }}
-        run: |
-          set -euo pipefail
-
-          repo="${{ steps.parse.outputs.repo }}"
-          head="${{ steps.parse.outputs.branch }}"
-          base="$(jq -r '.repository.default_branch // "main"' <<< '${{ steps.eventPayload.outputs.result }}')"
-          title="Codex: #${{ steps.parse.outputs.issue_number }}"
-          run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          last_message_file="$RUNNER_TEMP/codex.last-message.md"
-
-          existing="$(gh pr list --repo "$repo" --head "$head" --json url -q '.[0].url' || true)"
-          if [ -n "$existing" ]; then
-            echo "url=$existing" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          body_file=".codex.pr-body.md"
-          cat > "$body_file" <<EOF
-          Trigger: #${{ steps.parse.outputs.issue_number }}
-
-          Task:
-          > ${{ steps.parse.outputs.task }}
-
-          Run logs: ${run_url}
-          EOF
-
-          if [ -f "$last_message_file" ]; then
-            printf "\nCodex summary:\n\n" >> "$body_file"
-            cat "$last_message_file" >> "$body_file"
-          fi
-
-          args=(--repo "$repo" --head "$head" --base "$base" --title "$title" --body-file "$body_file")
-          if [ "${{ steps.parse.outputs.draft_pr }}" = "true" ]; then
-            args+=(--draft)
-          fi
-          url="$(gh pr create "${args[@]}")"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-
-      - name: Comment (success)
-        if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ inputs.authToken }}
-        run: |
-          run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          pr_url="${{ steps.pr.outputs.url }}"
-
-          msg="$(cat <<EOF
-          Codex completed.
-
-          Task:
-          > ${{ steps.parse.outputs.task }}
-
-          ${pr_url:+PR: ${pr_url}}
-          Run logs: ${run_url}
-          EOF
-          )"
-
-          gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$msg"

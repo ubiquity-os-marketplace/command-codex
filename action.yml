@@ -1,34 +1,35 @@
 name: "@ubiquity-os-marketplace/command-codex"
+description: "Run OpenAI Codex CLI agentically via GitHub Actions and return results as a PR/comment."
 
-on:
-  workflow_dispatch:
-    inputs:
-      stateId:
-        description: "State Id"
-      eventName:
-        description: "Event Name"
-      eventPayload:
-        description: "Event Payload"
-      settings:
-        description: "Settings"
-      authToken:
-        description: "Auth Token"
-      ref:
-        description: "Ref"
-      signature:
-        description: "Signature sent from the Kernel"
-      command:
-        description: "Command"
+inputs:
+  stateId:
+    description: "State Id"
+    required: true
+  eventName:
+    description: "Event Name"
+    required: true
+  eventPayload:
+    description: "Event Payload"
+    required: true
+  settings:
+    description: "Settings"
+    required: true
+  authToken:
+    description: "Auth Token"
+    required: true
+  ref:
+    description: "Ref"
+    required: false
+  signature:
+    description: "Signature sent from the Kernel"
+    required: true
+  command:
+    description: "Command"
+    required: false
 
-jobs:
-  compute:
-    name: "Codex"
-    runs-on: ubuntu-latest
-    permissions: write-all
-    timeout-minutes: 360
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && 'main' || 'development' }}
-
-    steps:
+runs:
+  using: "composite"
+  steps:
       - name: Decompress event payload
         uses: ubiquity-os/compress-action@main
         id: eventPayload
@@ -37,12 +38,14 @@ jobs:
           mode: decompress
 
       - name: Mask tokens
+        shell: bash
         run: |
           echo "::add-mask::${{ inputs.authToken }}"
           echo "::add-mask::${{ secrets.CODEX_AUTH_JSON_B64 }}"
           echo "::add-mask::${{ secrets.OPENAI_API_KEY }}"
 
       - name: Parse settings + validate invocation
+        shell: bash
         id: parse
         env:
           EVENT_PAYLOAD: ${{ steps.eventPayload.outputs.result }}
@@ -141,6 +144,7 @@ jobs:
           NODE
 
       - name: Comment (rejected)
+        shell: bash
         if: steps.parse.outputs.allowed != 'true'
         env:
           GH_TOKEN: ${{ inputs.authToken }}
@@ -163,6 +167,7 @@ jobs:
           persist-credentials: false
 
       - name: Create working branch
+        shell: bash
         if: steps.parse.outputs.allowed == 'true'
         run: |
           git config user.name "UbiquityOS Codex"
@@ -170,6 +175,7 @@ jobs:
           git switch -c "${{ steps.parse.outputs.branch }}"
 
       - name: Write Codex prompt
+        shell: bash
         if: steps.parse.outputs.allowed == 'true'
         run: |
           set -euo pipefail
@@ -202,12 +208,14 @@ jobs:
           node-version: 20
 
       - name: Install Codex CLI
+        shell: bash
         if: steps.parse.outputs.allowed == 'true'
         run: |
           npm install -g @openai/codex@0.72.0
           codex --version
 
       - name: Resolve Codex auth
+        shell: bash
         if: steps.parse.outputs.allowed == 'true'
         id: codex_auth
         env:
@@ -249,6 +257,7 @@ jobs:
           echo "decode_error=$decode_error" >> "$GITHUB_OUTPUT"
 
       - name: Comment (Codex auth required)
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated != 'true'
         env:
           GH_TOKEN: ${{ inputs.authToken }}
@@ -269,6 +278,7 @@ jobs:
           )"
 
       - name: Run Codex
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true'
         id: run_codex
         continue-on-error: true
@@ -316,6 +326,7 @@ jobs:
           exit "$exit_code"
 
       - name: Comment (Codex unauthorized)
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome != 'success'
         env:
           GH_TOKEN: ${{ inputs.authToken }}
@@ -341,6 +352,7 @@ jobs:
           )"
 
       - name: Comment (Codex failed)
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome != 'success'
         env:
           GH_TOKEN: ${{ inputs.authToken }}
@@ -360,10 +372,12 @@ jobs:
           )"
 
       - name: Run tests (optional)
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.parse.outputs.test_command != ''
         run: ${{ steps.parse.outputs.test_command }}
 
       - name: Detect diff
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success'
         id: diff
         run: |
@@ -375,6 +389,7 @@ jobs:
           git status --porcelain > "$RUNNER_TEMP/codex.changed-files.txt"
 
       - name: Comment (no changes)
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed != 'true'
         env:
           GH_TOKEN: ${{ inputs.authToken }}
@@ -391,6 +406,7 @@ jobs:
           )"
 
       - name: Commit + push
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed == 'true' && steps.parse.outputs.mode != 'comment-only'
         env:
           GH_TOKEN: ${{ inputs.authToken }}
@@ -404,6 +420,7 @@ jobs:
           git push -u origin "${{ steps.parse.outputs.branch }}"
 
       - name: Create or find PR
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed == 'true' && steps.parse.outputs.mode == 'pr'
         id: pr
         env:
@@ -447,6 +464,7 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Comment (success)
+        shell: bash
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ inputs.authToken }}
