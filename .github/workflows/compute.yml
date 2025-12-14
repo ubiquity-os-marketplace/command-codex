@@ -174,7 +174,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          cat > .codex.prompt.txt <<'PROMPT'
+          prompt_file="$RUNNER_TEMP/codex.prompt.txt"
+          cat > "$prompt_file" <<'PROMPT'
           You are an autonomous coding agent running inside a GitHub Actions job on ubuntu-latest.
 
           Runtime:
@@ -277,12 +278,12 @@ jobs:
           set -euo pipefail
 
           export CODEX_HOME="$HOME/.codex"
-          rm -f .codex.events.jsonl .codex.last-message.md
+          prompt_file="$RUNNER_TEMP/codex.prompt.txt"
+          events_file="$RUNNER_TEMP/codex.events.jsonl"
+          last_message_file="$RUNNER_TEMP/codex.last-message.md"
+          rm -f "$events_file" "$last_message_file"
 
           args=(-a never)
-          if [ -n "${{ steps.parse.outputs.model }}" ]; then
-            args+=(-m "${{ steps.parse.outputs.model }}")
-          fi
           if [ -n "${{ steps.parse.outputs.effort }}" ]; then
             args+=(-c "model_reasoning_effort=\"${{ steps.parse.outputs.effort }}\"")
           fi
@@ -291,19 +292,24 @@ jobs:
             exec
             --cd "${GITHUB_WORKSPACE}"
             --sandbox "${{ steps.parse.outputs.sandbox }}"
-            --output-last-message ".codex.last-message.md"
+            --output-last-message "$last_message_file"
             --color never
             --json
-            -
           )
+
+          if [ -n "${{ steps.parse.outputs.model }}" ]; then
+            args+=(--model "${{ steps.parse.outputs.model }}")
+          fi
 
           if [ -n "${{ steps.parse.outputs.codex_args }}" ]; then
             read -r -a extra <<< "${{ steps.parse.outputs.codex_args }}"
             args+=("${extra[@]}")
           fi
 
+          args+=(-)
+
           set +e
-          codex "${args[@]}" < .codex.prompt.txt | tee .codex.events.jsonl
+          codex "${args[@]}" < "$prompt_file" | tee "$events_file"
           exit_code=${PIPESTATUS[0]}
           set -e
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
@@ -315,12 +321,13 @@ jobs:
           GH_TOKEN: ${{ inputs.authToken }}
         run: |
           run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          events_file="$RUNNER_TEMP/codex.events.jsonl"
 
-          if [ ! -f .codex.events.jsonl ]; then
+          if [ ! -f "$events_file" ]; then
             exit 0
           fi
 
-          if ! grep -Eiq '401 Unauthorized|403 Forbidden|Not logged in' .codex.events.jsonl; then
+          if ! grep -Eiq '401 Unauthorized|403 Forbidden|Not logged in' "$events_file"; then
             exit 0
           fi
 
@@ -339,8 +346,9 @@ jobs:
           GH_TOKEN: ${{ inputs.authToken }}
         run: |
           run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          events_file="$RUNNER_TEMP/codex.events.jsonl"
 
-          if [ -f .codex.events.jsonl ] && grep -Eiq '401 Unauthorized|403 Forbidden|Not logged in' .codex.events.jsonl; then
+          if [ -f "$events_file" ] && grep -Eiq '401 Unauthorized|403 Forbidden|Not logged in' "$events_file"; then
             exit 0
           fi
 
@@ -364,7 +372,7 @@ jobs:
             exit 0
           fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
-          git status --porcelain > .codex.changed-files.txt
+          git status --porcelain > "$RUNNER_TEMP/codex.changed-files.txt"
 
       - name: Comment (no changes)
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed != 'true'
@@ -408,6 +416,7 @@ jobs:
           base="$(jq -r '.repository.default_branch // "main"' <<< '${{ steps.eventPayload.outputs.result }}')"
           title="Codex: #${{ steps.parse.outputs.issue_number }}"
           run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          last_message_file="$RUNNER_TEMP/codex.last-message.md"
 
           existing="$(gh pr list --repo "$repo" --head "$head" --json url -q '.[0].url' || true)"
           if [ -n "$existing" ]; then
@@ -425,9 +434,9 @@ jobs:
           Run logs: ${run_url}
           EOF
 
-          if [ -f .codex.last-message.md ]; then
+          if [ -f "$last_message_file" ]; then
             printf "\nCodex summary:\n\n" >> "$body_file"
-            cat .codex.last-message.md >> "$body_file"
+            cat "$last_message_file" >> "$body_file"
           fi
 
           args=(--repo "$repo" --head "$head" --base "$base" --title "$title" --body-file "$body_file")
