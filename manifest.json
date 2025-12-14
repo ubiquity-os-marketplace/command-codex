@@ -1,0 +1,109 @@
+{
+  "name": "command-codex",
+  "description": "Run OpenAI Codex CLI agentically via GitHub Actions and return results as a PR/comment.",
+  "ubiquity:listeners": ["issue_comment.created"],
+  "skipBotEvents": true,
+  "commands": {
+    "codex": {
+      "ubiquity:example": "/codex add a unit test for src/foo.ts",
+      "description": "Run Codex CLI to implement a requested change (creates/updates a PR).",
+      "parameters": {}
+    }
+  },
+  "configuration": {
+    "default": {
+      "allowedAuthorAssociations": ["OWNER", "MEMBER", "COLLABORATOR"],
+      "denyForkPRs": true,
+      "requireExplicitInvocation": true,
+      "mode": "pr",
+      "model": "",
+      "effort": "",
+      "sandbox": "workspace-write",
+      "codexArgs": "",
+      "safetyStrategy": "drop-sudo",
+      "passAuthTokenToCodex": false,
+      "draftPr": true,
+      "branchPrefix": "ubiquityos/codex",
+      "commitMessage": "codex: apply changes",
+      "maxRuntimeMinutes": 360
+    },
+    "type": "object",
+    "properties": {
+      "allowedAuthorAssociations": {
+        "type": "array",
+        "description": "Allowed GitHub author_association values for the triggering comment.",
+        "items": { "type": "string" },
+        "default": ["OWNER", "MEMBER", "COLLABORATOR"]
+      },
+      "denyForkPRs": {
+        "type": "boolean",
+        "description": "If true, refuse to run when the comment is on a pull request from a fork.",
+        "default": true
+      },
+      "requireExplicitInvocation": {
+        "type": "boolean",
+        "description": "If true, refuse to run unless the comment explicitly contains `/codex` or `@ubiquityos codex`.",
+        "default": true
+      },
+      "mode": {
+        "type": "string",
+        "description": "Execution output mode.",
+        "enum": ["pr", "commit-only", "comment-only"],
+        "default": "pr"
+      },
+      "model": {
+        "type": "string",
+        "description": "Codex model name (optional)."
+      },
+      "effort": {
+        "type": "string",
+        "description": "Codex reasoning effort (optional)."
+      },
+      "sandbox": {
+        "type": "string",
+        "description": "Codex CLI sandbox mode.",
+        "enum": ["read-only", "workspace-write", "danger-full-access"],
+        "default": "workspace-write"
+      },
+      "codexArgs": {
+        "type": "string",
+        "description": "Extra args forwarded to `codex exec` by `openai/codex-action` (optional)."
+      },
+      "safetyStrategy": {
+        "type": "string",
+        "description": "Hardening strategy for GitHub-hosted runners (passed to `openai/codex-action`).",
+        "enum": ["drop-sudo", "unprivileged-user", "read-only", "unsafe"],
+        "default": "drop-sudo"
+      },
+      "passAuthTokenToCodex": {
+        "type": "boolean",
+        "description": "If true, expose `inputs.authToken` to Codex as `GH_TOKEN` (enables `gh`/GitHub API access inside the agent).",
+        "default": false
+      },
+      "draftPr": {
+        "type": "boolean",
+        "description": "Create PRs as drafts.",
+        "default": true
+      },
+      "branchPrefix": {
+        "type": "string",
+        "description": "Branch prefix for Codex runs.",
+        "default": "ubiquityos/codex"
+      },
+      "commitMessage": {
+        "type": "string",
+        "description": "Commit message to use for Codex changes.",
+        "default": "codex: apply changes"
+      },
+      "testCommand": {
+        "type": "string",
+        "description": "Optional test command to run after Codex edits (e.g. `bun test`)."
+      },
+      "maxRuntimeMinutes": {
+        "type": "number",
+        "description": "Workflow timeout in minutes (best-effort; actual timeout also controlled by workflow).",
+        "default": 360
+      }
+    }
+  }
+}
