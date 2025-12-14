@@ -147,7 +147,7 @@ jobs:
         run: |
           run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          /codex rejected: ${{ steps.parse.outputs.deny_reason }}
+          Codex rejected: ${{ steps.parse.outputs.deny_reason }}
 
           Run logs: ${run_url}
           EOF
@@ -255,7 +255,7 @@ jobs:
           run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          /codex cannot run: Codex authentication is missing or invalid in the plugin runner.
+          Codex cannot run: Codex authentication is missing or invalid in the plugin runner.
 
           To use ChatGPT subscription auth in CI:
           1) On a trusted local machine, run \`codex login --device-auth\` (or \`codex login\`).
@@ -325,7 +325,7 @@ jobs:
           fi
 
           gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          /codex failed: Codex subscription auth appears expired/invalid.
+          Codex auth expired: Codex subscription auth appears expired/invalid.
 
           Refresh \`CODEX_AUTH_JSON_B64\` with a newly logged-in \`~/.codex/auth.json\`, then re-run.
 
@@ -345,7 +345,7 @@ jobs:
           fi
 
           gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          /codex failed: Codex did not complete successfully.
+          Codex failed: Codex did not complete successfully.
 
           Run logs: ${run_url}
           EOF
@@ -359,12 +359,12 @@ jobs:
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success'
         id: diff
         run: |
-          if git diff --quiet; then
+          if [ -z "$(git status --porcelain)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
-          git diff --name-only > .codex.changed-files.txt
+          git status --porcelain > .codex.changed-files.txt
 
       - name: Comment (no changes)
         if: steps.parse.outputs.allowed == 'true' && steps.codex_auth.outputs.authenticated == 'true' && steps.run_codex.outcome == 'success' && steps.diff.outputs.changed != 'true'
@@ -373,7 +373,7 @@ jobs:
         run: |
           run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           gh issue comment "${{ steps.parse.outputs.issue_number }}" --repo "${{ steps.parse.outputs.repo }}" --body "$(cat <<EOF
-          /codex completed but produced no file changes.
+          Codex completed but produced no file changes.
 
           Task:
           > ${{ steps.parse.outputs.task }}
@@ -446,7 +446,7 @@ jobs:
           pr_url="${{ steps.pr.outputs.url }}"
 
           msg="$(cat <<EOF
-          /codex completed.
+          Codex completed.
 
           Task:
           > ${{ steps.parse.outputs.task }}
