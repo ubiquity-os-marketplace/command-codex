@@ -10,22 +10,27 @@ It is intended to be run as a **GitHub Actions plugin** (via `workflow_dispatch`
 ## What’s included
 
 - `manifest.json`: declares a single `codex` command (no tool parameters; task is extracted from the comment body).
-- `.github/workflows/compute.yml`: a first-pass workflow that:
+- `action.yml`: the action implementation that:
   - decompresses the kernel event payload
   - validates explicit invocation + basic authorization
   - checks out the target repo using the kernel-provided `authToken`
-  - runs Codex via `openai/codex-action@v1` (`codex exec`)
+  - runs Codex (`codex exec`)
   - commits & pushes changes to a branch
   - creates a draft PR and comments back with the PR link
+- `.github/workflows/dispatch.yml`: the workflow entrypoint invoked via `workflow_dispatch` by the kernel.
 
 This mirrors the patterns used by:
 
-- `lib/command-ask/.github/workflows/compute.yml` (decompress + checkout target repo)
+- `lib/command-ask/.github/workflows/dispatch.yml` (workflow wrapper calling `./`)
 - `lib/hello-world-plugin/manifest.json` (simple command declaration)
 
 ## Required secrets (in the plugin repo)
 
-`openai/codex-action` is API-key based, so you need:
+Subscription auth (preferred):
+
+- `CODEX_AUTH_JSON_B64` (base64 of Codex CLI `auth.json`)
+
+Optional fallback (pay-per-request):
 
 - `OPENAI_API_KEY`
 
@@ -55,5 +60,4 @@ plugins:
 ## Notes
 
 - This skeleton is intentionally conservative: it does not pass GitHub tokens to Codex.
-- For fork PRs and other edge cases, refine policies in `compute.yml`.
-- `openai/codex-action` has its own workflow-actor permission gate; the workflow sets `allow-bots: true` because kernel-triggered `workflow_dispatch` runs are typically started by a bot/App actor.
+- For fork PRs and other edge cases, refine policies in `action.yml`.
