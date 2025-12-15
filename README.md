@@ -17,11 +17,11 @@ It is intended to be run as a **GitHub Actions plugin** (via `workflow_dispatch`
   - runs Codex (`codex exec`)
   - commits & pushes changes to a branch
   - creates a draft PR and comments back with the PR link
-- `.github/workflows/action.yml`: the workflow entrypoint invoked via `workflow_dispatch` by the kernel.
+- `.github/workflows/dispatch.yml`: the workflow entrypoint invoked via `workflow_dispatch` by the kernel.
 
 This mirrors the patterns used by:
 
-- `lib/command-ask/.github/workflows/action.yml` (workflow wrapper calling `./action.yml`)
+- `lib/command-ask/.github/workflows/dispatch.yml` (workflow wrapper calling `./`)
 - `lib/hello-world-plugin/manifest.json` (simple command declaration)
 
 ## Required secrets (in the plugin repo)

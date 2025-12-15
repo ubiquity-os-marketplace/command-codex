@@ -1,4 +1,4 @@
-name: "Codex Action"
+name: "Codex Dispatch"
 
 on:
   workflow_dispatch:
@@ -35,7 +35,8 @@ jobs:
     timeout-minutes: 360
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && 'main' || 'development' }}
     steps:
-      - uses: ./action.yml
+      - uses: actions/checkout@v5
+      - uses: ./
         with:
           stateId: ${{ inputs.stateId }}
           eventName: ${{ inputs.eventName }}
@@ -45,4 +46,3 @@ jobs:
           ref: ${{ inputs.ref }}
           signature: ${{ inputs.signature }}
           command: ${{ inputs.command }}
-
