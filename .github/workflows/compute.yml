@@ -13,6 +13,11 @@ on:
         description: "Settings"
       authToken:
         description: "Auth Token"
+      ubiquityKernelToken:
+        description: "Kernel attestation token (optional)"
+      kernelPublicKey:
+        description: "Kernel public key PEM for signature verification (optional)"
+        required: false
       ref:
         description: "Ref"
       signature:
