@@ -1,5 +1,6 @@
 {
   "name": "command-codex",
+  "short_name": "ubiquity-os-marketplace/command-codex@development",
   "description": "Run OpenAI Codex CLI agentically via GitHub Actions and return results as a PR/comment.",
   "ubiquity:listeners": ["issue_comment.created"],
   "skipBotEvents": true,
